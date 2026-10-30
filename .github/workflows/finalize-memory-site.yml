@@ -1,0 +1,70 @@
+name: Finalize memory-based site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Remove placeholder profile image and sample files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('_config.yml')
+          text = path.read_text()
+          text, count = re.subn(
+              r'^(\s*avatar\s*:\s*)"profile\.png"\s*$',
+              r'\1',
+              text,
+              flags=re.MULTILINE,
+          )
+          assert count == 1, f'avatar replacements: {count}'
+          path.write_text(text)
+
+          path = Path('_includes/author-profile.html')
+          text = path.read_text()
+          old = '  <div class="author__avatar">'
+          assert old in text
+          text = text.replace(old, '  {% if author.avatar %}\n  <div class="author__avatar">', 1)
+          old = '  </div>\n\n  <div class="author__content">'
+          assert old in text
+          text = text.replace(
+              old,
+              '  </div>\n  {% endif %}\n\n  <div class="author__content">',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path('_includes/seo.html')
+          text = path.read_text()
+          old = '''{% else %}
+            {% assign seo_image_abs = "/images/og-image.png" | prepend: base_path %}
+          {% endif %}'''
+          # Liquid source uses two-space indentation; normalize matching by regex if needed.
+          pattern = re.compile(
+              r'\{% else %\}\s*\{% assign seo_image_abs = "/images/og-image\.png" \| prepend: base_path %\}\s*\{% endif %\}'
+          )
+          text, count = pattern.subn('{% endif %}', text, count=1)
+          assert count == 1, f'seo fallback replacements: {count}'
+          path.write_text(text)
+          PY
+
+          rm -f files/bibtex1.bib files/paper1.pdf files/paper2.pdf files/paper3.pdf files/slides1.pdf files/slides2.pdf files/slides3.pdf
+          rm -f .github/workflows/finalize-memory-site.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove template placeholder assets"
+          git push
